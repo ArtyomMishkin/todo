@@ -12,7 +12,8 @@ import (
 )
 
 func main() {
-	repo := task.NewRepo()
+	storage := task.NewFileStorage("tasks.json")
+	repo := task.NewRepo(storage)
 	h := task.NewHandler(repo)
 
 	r := chi.NewRouter()
@@ -25,6 +26,12 @@ func main() {
 		w.Write([]byte("OK"))
 	})
 
+	// Версионирование API
+	r.Route("/api/v1", func(api chi.Router) {
+		api.Mount("/tasks", h.Routes())
+	})
+
+	// Старая версия для обратной совместимости (опционально)
 	r.Route("/api", func(api chi.Router) {
 		api.Mount("/tasks", h.Routes())
 	})

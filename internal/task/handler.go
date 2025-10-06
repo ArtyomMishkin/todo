@@ -2,6 +2,7 @@ package task
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strconv"
 
@@ -27,7 +28,42 @@ func (h *Handler) Routes() chi.Router {
 }
 
 func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, h.repo.List())
+	opts := parseListOptions(r)
+	tasks, total := h.repo.ListWithPagination(opts)
+
+	response := map[string]interface{}{
+		"tasks": tasks,
+		"total": total,
+		"page":  opts.Page,
+		"limit": opts.Limit,
+	}
+	writeJSON(w, http.StatusOK, response)
+}
+
+func parseListOptions(r *http.Request) ListOptions {
+	query := r.URL.Query()
+	page, _ := strconv.Atoi(query.Get("page"))
+	if page < 1 {
+		page = 1
+	}
+	limit, _ := strconv.Atoi(query.Get("limit"))
+	if limit < 1 || limit > 100 {
+		limit = 10
+	}
+
+	var done *bool
+	if query.Has("done") {
+		d, err := strconv.ParseBool(query.Get("done"))
+		if err == nil {
+			done = &d
+		}
+	}
+
+	return ListOptions{
+		Page:  page,
+		Limit: limit,
+		Done:  done,
+	}
 }
 
 func (h *Handler) get(w http.ResponseWriter, r *http.Request) {
@@ -47,12 +83,28 @@ type createReq struct {
 	Title string `json:"title"`
 }
 
+func validateTitle(title string) error {
+	if len(title) < 3 {
+		return errors.New("title must be at least 3 characters long")
+	}
+	if len(title) > 100 {
+		return errors.New("title must be at most 100 characters long")
+	}
+	return nil
+}
+
 func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 	var req createReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Title == "" {
 		httpError(w, http.StatusBadRequest, "invalid json: require non-empty title")
 		return
 	}
+
+	if err := validateTitle(req.Title); err != nil {
+		httpError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
 	t := h.repo.Create(req.Title)
 	writeJSON(w, http.StatusCreated, t)
 }
@@ -72,6 +124,12 @@ func (h *Handler) update(w http.ResponseWriter, r *http.Request) {
 		httpError(w, http.StatusBadRequest, "invalid json: require non-empty title")
 		return
 	}
+
+	if err := validateTitle(req.Title); err != nil {
+		httpError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
 	t, err := h.repo.Update(id, req.Title, req.Done)
 	if err != nil {
 		httpError(w, http.StatusNotFound, err.Error())
